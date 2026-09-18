@@ -790,7 +790,7 @@ def run(cfg, una_vez=False, dry_run=False):
     return est
 
 
-def recibo_global(cfg, est):
+def recibo_global(cfg, est, escribir=True):
     cuenta = {}
     for j in est["jobs"].values():
         cuenta[j.get("estado", "NEW")] = cuenta.get(j.get("estado", "NEW"), 0) + 1
@@ -809,16 +809,18 @@ def recibo_global(cfg, est):
         "execution_authority": "NONE",
     }
     rec["recibo_sha256"] = sha256_obj({k: v for k, v in rec.items() if k != "recibo_sha256"})
-    escribir_json_atomico(os.path.join(cfg["orq_dir"], "RECIBO_ORQUESTADOR.json"), rec)
+    if escribir:
+        escribir_json_atomico(os.path.join(cfg["orq_dir"], "RECIBO_ORQUESTADOR.json"), rec)
     return rec
 
 
 # ---------------------------------------------------------------------------
 # Informe
 # ---------------------------------------------------------------------------
-def informe(cfg, est, como_json=False):
+def informe(cfg, est, como_json=False, escribir_recibo_global=True):
     if como_json:
-        print(json.dumps({"estado": est, "recibo": recibo_global(cfg, est)}, indent=1, sort_keys=True))
+        print(json.dumps({"estado": est, "recibo": recibo_global(cfg, est, escribir=escribir_recibo_global)},
+                         indent=1, sort_keys=True))
         return
     jobs = est["jobs"]
     cuenta = {}
@@ -1095,14 +1097,17 @@ def main():
                          indent=1, sort_keys=True, ensure_ascii=False))
         return 1 if problemas else 0
 
+    # 'estado' es solo lectura y NO toma el candado: consultar como va el trabajo tiene
+    # que funcionar mientras el servicio corre, que es justo cuando interesa preguntarlo.
+    if a.accion == "estado":
+        informe(cfg, cargar_estado(cfg), a.json, escribir_recibo_global=False)
+        return 0
+
     with CandadoGlobal(os.path.join(cfg["orq_dir"], ".lock_orquestador")):
         if a.accion == "plan":
             est = plan(cfg, cargar_estado(cfg))
             guardar_estado(cfg, est)
             informe(cfg, est, a.json)
-            return 0
-        if a.accion == "estado":
-            informe(cfg, cargar_estado(cfg), a.json)
             return 0
         if a.accion == "verificar":
             if not a.job:
