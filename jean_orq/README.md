@@ -149,3 +149,40 @@ arrancar sin parar nada, y toma el relevo cuando la cadena externa termina o mue
   logs/orquestador.log         traza de decisiones
   logs/job_<job>.log           salida del driver de cada partición
 ```
+
+## fs1_normalizar 2.2: el latido de libro de bybit
+
+Un `book_delta` de bybit puede llegar con `b` y `a` vacíos pero con `u` y `seq` nuevos.
+Hasta 2.1 esos mensajes iban a cuarentena (`BOOK_DELTA_SIN_NIVELES`) con un comentario que
+decía *"No se pierde nada"*. Medido el 18-sep sobre `bybit_2026-09-13`, 3 ficheros crudos,
+320.657 `book_delta` de los que 1.456 venían vacíos:
+
+| escenario | encadenan | rompen | `u == u_anterior + 1` |
+|---|---|---|---|
+| con los latidos dentro | 320.467 | **0** | **100,0000 %** |
+| sin ellos (lo que veía fs2) | 317.836 | 1.175 | 99,6317 % |
+
+El latido **gasta** un número de la cadena. Tirarlo abre un agujero que no existía, y cada
+agujero deja el libro de ese símbolo inválido hasta la siguiente foto. Ese era el motivo
+real de que bybit midiera 69,25 % de tiempo con libro válido, y también del 0,43 % que yo
+mismo había atribuido al exchange: era nuestro.
+
+Desde 2.2 el latido se emite como una fila **sin niveles**, con los identificadores y nada
+más. `fs2_libro.py:433` ya salta los niveles de precio nulo, así que encadena el libro sin
+tocarlo. Se aplica con `parche_fs1_2_2_latido.py`, que **se niega a correr si hay algún
+normalizador vivo**: `g1_particion.py:167` sella el sha256 del normalizador *después* de
+que el proceso termine, así que cambiar el fichero en caliente haría que los trabajos en
+vuelo firmaran su `code_version` real con el sha del binario nuevo.
+
+Alcance medido: **solo bybit**. binance (236.214 `book_delta`) y okx (136.286) no tienen ni
+un delta vacío, así que su salida con 2.2 es idéntica a la de 2.1 y sus particiones ya
+hechas siguen valiendo.
+
+### Dos fallos del gate encontrados por el camino
+
+- **C1 rechazaba la 2.1.** Comparaba con `startswith("fs1_normalizar/2.0")`, que no casa con
+  `"fs1_normalizar/2.1"`. Toda partición normalizada con 2.1 habría caído con el motivo
+  equivocado. Sustituido por la lista explícita `VERSIONES_FS1_OK`.
+- **C7b tenía el punto ciego justo aquí.** `C7b_NADA_RELEVANTE_DESCARTADO_EN_SILENCIO` solo
+  considera silenciosos `UNKNOWN_EVENT_TYPE` y `EMPTY_RESULT`, así que 196.647 eslabones de
+  secuencia tirados pasaron como PASS. El check que existía para esto no lo vio.

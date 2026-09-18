@@ -96,10 +96,16 @@ CONFIG_DEF = {
     # las filas y en okx el 22,1 %. Para binance, 2.0 y 2.1 producen salida identica (medido:
     # 1959 = 1959 recuperaciones sobre los mismos ficheros), por eso ahi valen las dos y no
     # hay que rehacer 30 h de trabajo correcto.
+    # 2.2 anade el latido de libro de bybit: un book_delta sin niveles GASTA un numero de
+    # la cadena, y hasta 2.1 se tiraba a cuarentena. Medido: con el latido dentro bybit
+    # encadena 320.467 pares sin una sola rotura; sin el, 1.175 agujeros en 3 ficheros.
+    # Por eso bybit pasa a exigir 2.2 y punto. binance y okx no tienen ni un delta vacio
+    # (0 de 236.214 y 0 de 136.286 medidos), asi que para ellos 2.2 produce exactamente lo
+    # mismo que 2.1 y sus particiones ya hechas siguen valiendo.
     "code_versions_ok": {
-        "binance": ["fs1_normalizar/2.0", "fs1_normalizar/2.1"],
-        "bybit": ["fs1_normalizar/2.1"],
-        "okx": ["fs1_normalizar/2.1"],
+        "binance": ["fs1_normalizar/2.0", "fs1_normalizar/2.1", "fs1_normalizar/2.2"],
+        "bybit": ["fs1_normalizar/2.2"],
+        "okx": ["fs1_normalizar/2.1", "fs1_normalizar/2.2"],
     },
     # sha256 esperado de CADA version. Dos versiones distintas son legitimas si estan
     # declaradas arriba; dos binarios distintos bajo la MISMA version, nunca.
