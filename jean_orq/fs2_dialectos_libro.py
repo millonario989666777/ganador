@@ -76,6 +76,17 @@ class Dialecto(object):
         """
         raise NotImplementedError
 
+    def continua_tras_foto(self, ultimo_u, U, u, pu):
+        """El PRIMER delta despues de una foto no encadena por igualdad.
+
+        La foto se toma por REST en un instante cualquiera, y el stream sigue su propio
+        ritmo: el delta que hay que aceptar es el que ABARCA ese instante, no el que
+        empieza justo donde acabo la foto. Medido en este mismo proyecto: solo 265 de 403
+        fotos encadenaban directo. Exigir igualdad aqui deja el libro desincronizado
+        hasta la foto siguiente y hunde el tiempo valido sin que nada de error.
+        """
+        return self.continua(ultimo_u, U, u, pu)
+
 
 class DialectoPu(Dialecto):
     """binance USDT-M y okx: el delta trae el id del anterior y tiene que cuadrar.
@@ -89,6 +100,16 @@ class DialectoPu(Dialecto):
             return False
         return pu == ultimo_u
 
+    def continua_tras_foto(self, ultimo_u, U, u, pu):
+        if ultimo_u is None or u is None:
+            return False
+        # el delta que abarca el instante de la foto
+        if pu is not None and pu <= ultimo_u < u:
+            return True
+        if U is not None and U <= ultimo_u + 1 <= u:
+            return True
+        return pu is not None and pu == ultimo_u
+
 
 class DialectoIncremental(Dialecto):
     """bybit: no manda prev_update_id, encadena porque u sube exactamente de uno en uno."""
@@ -97,6 +118,26 @@ class DialectoIncremental(Dialecto):
         if ultimo_u is None or u is None:
             return False
         return u == ultimo_u + 1
+
+    def continua_tras_foto(self, ultimo_u, U, u, pu):
+        """bybit pide la foto por REST y el stream sigue su propio ritmo.
+
+        MEDIDO el 20260918 sobre 410 fotos de bybit_2026-09-13, saltos del primer delta
+        respecto a la foto:  +1 56,3 %   +2 18,8 %   +3 10,7 %   +4 5,4 %   +5 2,7 %   >5 6,1 %
+        Es decir, exigir u+1 rechaza el 43,7 por ciento de los arranques y desincroniza el
+        libro tras casi la mitad de las fotos, sin que nada de error.
+
+        Y a diferencia de binance u okx, bybit no manda U ni pu, asi que NO hay forma de
+        comprobar si un delta abarca el instante de la foto. Se acepta el primer delta
+        POSTERIOR a la foto bajo un SUPUESTO DECLARADO: que la foto contiene todo lo
+        anterior a ella. Si de verdad se perdieron deltas en ese hueco, el libro arranca
+        con ese error dentro. Por eso los arranques con salto se cuentan aparte
+        (arranques_con_salto), para que la magnitud del supuesto sea auditable y no
+        quede escondida en un porcentaje bonito.
+        """
+        if ultimo_u is None or u is None:
+            return False
+        return u > ultimo_u
 
 
 DIALECTOS = {
@@ -144,6 +185,9 @@ class MaquinaLibro(object):
         self.aplicados = 0
         self.rechazados = 0
         self.resyncs = 0
+        self.previos_descartados = 0      # deltas anteriores a la foto: no son huecos
+        self.arranques_con_salto = 0      # fotos cuyo primer delta no encadeno por +1
+        self.esperando_primer_delta = False
 
     @property
     def usable(self):
@@ -161,6 +205,7 @@ class MaquinaLibro(object):
         self.motivo = None
         self.generacion += 1
         self.resyncs += 1
+        self.esperando_primer_delta = True
         return True
 
     def delta(self, U, u, pu):
@@ -174,7 +219,24 @@ class MaquinaLibro(object):
             self.motivo = GAP_AFTER_SNAPSHOT
             self.rechazados += 1
             return False
-        if not self.dialecto.continua(self.ultimo_u, U, u, pu):
+
+        # Un delta ANTERIOR a la foto no es un hueco: es cola del stream que ya venia en
+        # camino. Se descarta sin romper nada, porque su contenido ya esta en la foto.
+        if u is not None and self.ultimo_u is not None and u <= self.ultimo_u:
+            self.previos_descartados += 1
+            return False
+
+        if self.esperando_primer_delta:
+            if self.dialecto.continua_tras_foto(self.ultimo_u, U, u, pu):
+                self.esperando_primer_delta = False
+                if u is not None and self.ultimo_u is not None and u != self.ultimo_u + 1:
+                    self.arranques_con_salto += 1
+            else:
+                self.estado = DESYNCED
+                self.motivo = GAP_AFTER_SNAPSHOT
+                self.rechazados += 1
+                return False
+        elif not self.dialecto.continua(self.ultimo_u, U, u, pu):
             self.estado = DESYNCED
             self.motivo = GAP_AFTER_SNAPSHOT
             self.rechazados += 1
@@ -194,6 +256,8 @@ class MaquinaLibro(object):
             "aplicados": self.aplicados,
             "rechazados": self.rechazados,
             "resyncs": self.resyncs,
+            "previos_descartados": self.previos_descartados,
+            "arranques_con_salto": self.arranques_con_salto,
             "motivo": self.motivo,
         }
 
@@ -239,6 +303,8 @@ def autotest():
     check("un delta antes de la foto no se aplica", not m.delta(None, 10, None))
     m.foto(10)
     check("tras la foto es usable", m.usable and m.generacion == 1)
+    check("un delta anterior a la foto se descarta sin romper nada",
+          (not m.delta(None, 9, None)) and m.usable and m.previos_descartados == 1)
     check("el delta que encadena se aplica", m.delta(None, 11, None))
     check("un salto rompe la cadena", not m.delta(None, 13, None))
     check("tras el salto queda DESYNCED", m.estado == DESYNCED and m.motivo == GAP_AFTER_SNAPSHOT)
@@ -247,6 +313,13 @@ def autotest():
     m.foto(20)
     check("solo la foto resincroniza", m.usable and m.generacion == 2)
     check("y sigue la cuenta desde el nuevo id", m.delta(None, 21, None))
+
+    # 4b. bybit: la foto viene por REST y el primer delta puede llegar con salto
+    bb = MaquinaLibro("bybit")
+    bb.foto(100)
+    check("bybit acepta el primer delta con salto tras la foto", bb.delta(None, 104, None))
+    check("y lo cuenta como arranque con salto, no lo esconde", bb.arranques_con_salto == 1)
+    check("despues ya exige u+1 estricto", bb.delta(None, 105, None) and not bb.delta(None, 110, None))
 
     # 5. okx completo
     o = MaquinaLibro("okx")
