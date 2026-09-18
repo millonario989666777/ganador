@@ -91,6 +91,19 @@ CONFIG_DEF = {
     "sha_completo": False,           # el gate (C2) ya verifica sha256 de toda la salida
     "umbral_connection_start": 200,  # norma del proyecto: por encima, investigar la particion
     "umbral_missing_event_ts": 0.05, # ratio de filas sin hora de evento que merece alerta
+    # Contrato de version POR EXCHANGE. No es capricho: fs1_normalizar/2.0 recupera la hora
+    # de evento solo con las claves de binance, asi que en bybit deja sin hora el 37,51 % de
+    # las filas y en okx el 22,1 %. Para binance, 2.0 y 2.1 producen salida identica (medido:
+    # 1959 = 1959 recuperaciones sobre los mismos ficheros), por eso ahi valen las dos y no
+    # hay que rehacer 30 h de trabajo correcto.
+    "code_versions_ok": {
+        "binance": ["fs1_normalizar/2.0", "fs1_normalizar/2.1"],
+        "bybit": ["fs1_normalizar/2.1"],
+        "okx": ["fs1_normalizar/2.1"],
+    },
+    # sha256 esperado de CADA version. Dos versiones distintas son legitimas si estan
+    # declaradas arriba; dos binarios distintos bajo la MISMA version, nunca.
+    "sha_por_version": {},
     "normalizador_sha256": "",       # pin de version; vacio = se fija con la primera particion
     "max_intentos": 2,
 }
@@ -383,14 +396,16 @@ def verificar_particion(cfg, exchange, dia, correr_gate=True):
     # 2. version del codigo, fijada y estable en todo el corte
     ev["code_version"] = man.get("code_version")
     ev["normalizador_sha256"] = med.get("normalizador_sha256")
-    if man.get("code_version") != "fs1_normalizar/2.0":
-        return False, "CODE_VERSION_INESPERADA", ev, alertas
+    versiones_ok = (cfg.get("code_versions_ok") or {}).get(exchange)
+    if versiones_ok and man.get("code_version") not in versiones_ok:
+        ev["code_versions_ok"] = versiones_ok
+        return False, "CODE_VERSION_NO_ADMITIDA_PARA_ESTE_VENUE", ev, alertas
     if man.get("schema_version") != "market_event_v1":
         return False, "SCHEMA_INESPERADO", ev, alertas
-    pin = cfg.get("normalizador_sha256") or ""
-    if pin and med.get("normalizador_sha256") and med["normalizador_sha256"] != pin:
-        ev["pin_esperado"] = pin
-        return False, "NORMALIZADOR_CAMBIO_A_MITAD_DEL_CORTE", ev, alertas
+    esperado = (cfg.get("sha_por_version") or {}).get(man.get("code_version"))
+    if esperado and med.get("normalizador_sha256") and med["normalizador_sha256"] != esperado:
+        ev["sha_esperado_para_esa_version"] = esperado
+        return False, "NORMALIZADOR_CAMBIO_SIN_SUBIR_VERSION", ev, alertas
 
     # 3. entrada: tantos ficheros como enlaces hay en raw/
     raw_dir = os.path.join(part, "raw")
@@ -491,6 +506,24 @@ def verificar_particion(cfg, exchange, dia, correr_gate=True):
             return False, "GATE_G1_FAIL", ev, alertas
 
     return True, None, ev, alertas
+
+
+def registrar_sha_version(cfg, est, ev):
+    """Aprende el sha256 del normalizador para cada version que aparece.
+
+    La primera particion de una version fija su sha. A partir de ahi, esa version tiene
+    que salir siempre del mismo binario: si cambia sin subir el numero, es un cambio
+    silencioso y la particion se rechaza.
+    """
+    ver = ev.get("code_version")
+    sha = ev.get("normalizador_sha256")
+    if not ver or not sha:
+        return
+    pines = est.setdefault("sha_por_version", {})
+    if ver not in pines:
+        pines[ver] = sha
+        log(cfg, "version %s fijada al normalizador %s" % (ver, sha[:16]))
+    cfg["sha_por_version"] = dict(pines)
 
 
 def escribir_recibo(cfg, exchange, dia, ok, motivo, ev, alertas, extra=None):
@@ -615,9 +648,7 @@ def plan(cfg, est, correr_gate=True):
                 escribir_recibo(cfg, ex, dia, True, None, ev, alertas, {"adoptada": True})
                 set_estado(cfg, est, jid, "PASS", "adoptada: ya estaba hecha y verifica",
                            evidencia=ev, alertas=alertas)
-                if not est.get("normalizador_sha256") and ev.get("normalizador_sha256"):
-                    est["normalizador_sha256"] = ev["normalizador_sha256"]
-                    cfg["normalizador_sha256"] = ev["normalizador_sha256"]
+                registrar_sha_version(cfg, est, ev)
                 continue
 
         # 2. lo que otro proceso esta haciendo, no se toca
@@ -722,9 +753,7 @@ def revisar_en_curso(cfg, est, procesos):
         ok, motivo, ev, alertas = verificar_particion(cfg, ex, dia)
         escribir_recibo(cfg, ex, dia, ok, motivo, ev, alertas)
         if ok:
-            if not est.get("normalizador_sha256") and ev.get("normalizador_sha256"):
-                est["normalizador_sha256"] = ev["normalizador_sha256"]
-                cfg["normalizador_sha256"] = ev["normalizador_sha256"]
+            registrar_sha_version(cfg, est, ev)
             set_estado(cfg, est, jid, "PASS", None, evidencia=ev, alertas=alertas)
             for a in alertas:
                 log(cfg, "ALERTA %s: %s" % (jid, a))
@@ -979,14 +1008,24 @@ def autotest():
         ok, motivo, _, _ = verificar_particion(cfg, "binance", dia, correr_gate=False)
         check("un fichero de salida alterado da FAIL", (not ok) and motivo == "HASH_SALIDA_NO_COINCIDE", str(motivo))
 
-        # 9. cambio del normalizador a mitad del corte => FAIL
+        # 9. cambiar el binario SIN subir el numero de version => FAIL
         with open(os.path.join(part, "normalized", "events-0.market_event_v1.parquet"), "wb") as f:
             f.write(b"y" * 10)
-        cfg["normalizador_sha256"] = "otro_distinto"
+        cfg["sha_por_version"] = {"fs1_normalizar/2.0": "otro_binario_distinto"}
         ok, motivo, _, _ = verificar_particion(cfg, "binance", dia, correr_gate=False)
-        check("cambiar el normalizador a mitad da FAIL",
-              (not ok) and motivo == "NORMALIZADOR_CAMBIO_A_MITAD_DEL_CORTE", str(motivo))
-        cfg["normalizador_sha256"] = ""
+        check("cambiar el binario sin subir la version da FAIL",
+              (not ok) and motivo == "NORMALIZADOR_CAMBIO_SIN_SUBIR_VERSION", str(motivo))
+        cfg["sha_por_version"] = {}
+
+        # 9b. el caso real del 20260918: una particion de bybit hecha con 2.0 NO vale,
+        #     porque esa version deja sin hora de evento el 37,51 % de sus filas.
+        #     La misma version en binance SI vale: ahi 2.0 y 2.1 dan salida identica.
+        ok_by, motivo_by, _, _ = verificar_particion(cfg, "bybit", dia, correr_gate=False)
+        check("bybit con fs1_normalizar/2.0 se rechaza",
+              (not ok_by) and motivo_by in ("CODE_VERSION_NO_ADMITIDA_PARA_ESTE_VENUE", "SIN_PARTICION"),
+              str(motivo_by))
+        ok_bi, _, _, _ = verificar_particion(cfg, "binance", dia, correr_gate=False)
+        check("binance con fs1_normalizar/2.0 se sigue aceptando", ok_bi)
 
         # 10. adopcion: lo ya hecho no se repite
         est = plan(cfg, estado_nuevo(cfg), correr_gate=False)
