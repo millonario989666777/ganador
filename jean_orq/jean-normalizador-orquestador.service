@@ -1,0 +1,22 @@
+[Unit]
+Description=JEAN normalizador orquestador V1 - gobierna fs1_normalizar 2.0 sobre las particiones del corte
+Documentation=file:/home/jean/JEAN_ORQUESTADOR/README.md
+After=network-online.target
+
+[Service]
+Type=simple
+User=jean
+Group=jean
+WorkingDirectory=/home/jean/JEAN_ORQUESTADOR
+ExecStart=/usr/bin/python3 /home/jean/JEAN_ORQUESTADOR/jean_orq.py run --workers 2
+# El bucle termina cuando no queda nada pendiente; systemd lo vuelve a levantar y
+# revisa de nuevo. Asi el vigilante es permanente sin consumir nada mientras espera.
+Restart=always
+RestartSec=300
+Nice=5
+OOMPolicy=continue
+StandardOutput=append:/home/jean/JEAN_ORQUESTADOR/logs/servicio.log
+StandardError=append:/home/jean/JEAN_ORQUESTADOR/logs/servicio.log
+
+[Install]
+WantedBy=multi-user.target
