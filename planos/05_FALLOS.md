@@ -99,3 +99,8 @@ cierra, mueren los tres.** No es nuestro, pero queda avisado.
    `book_state` desde la noche anterior. Tardó 4 minutos.
 5. **Prioricé el grabador antes de medir.** La foto en banda de bybit vale ~9 fotos al
    día; el problema real eran las 56.687 REST periódicas.
+6. **Confundí callado con muerto.** Di la alarma porque el orquestador llevaba 10 minutos
+   sin lanzar nada. Estaba verificando `binance_09-15` con el gate al 100 % de CPU: los
+   675 ficheros de salida tardan en leerse, y el gate solo escribe en el log cuando
+   termina. Es el mismo error que el número 1, con otro disfraz: **ausencia de señal no es
+   señal de ausencia**. Antes de dar una alarma, mirar los hijos del proceso.

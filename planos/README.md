@@ -15,6 +15,7 @@ cifra plausible.
 | [04_MEDIDAS.md](04_MEDIDAS.md) | todos los números medidos, en un sitio |
 | [05_FALLOS.md](05_FALLOS.md) | los fallos encontrados, con su prueba y su estado |
 | [06_PENDIENTE.md](06_PENDIENTE.md) | lo que falta, por orden |
+| [07_RELOJ_Y_REDUNDANCIA.md](07_RELOJ_Y_REDUNDANCIA.md) | los tres relojes, y lo que el mercado institucional tiene y cripto no |
 
 ## La regla que lo gobierna todo
 

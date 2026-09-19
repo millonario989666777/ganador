@@ -46,6 +46,9 @@ irrecuperable.
 
 8. **Leer `capture.py` 120–190** y averiguar por qué no se guarda la foto en banda de
    bybit. Solo leer.
+9 bis. **Doble conexión independiente arbitrada por secuencia** (A/B fabricado). Es el
+   único cambio de grabación que reduciría de verdad la pérdida real. Cuesta 2× de red y
+   casi nada de disco si se fusiona antes de escribir. Ver plano 07.
 9. **Pedir la foto REST alineada**: abrir el stream y bufferizar ANTES de pedirla, que es
    el procedimiento que documenta binance. Reduciría el 4,3 % de enganches fallidos en
    origen, además de lo que ya arregla fs2 1.1 en diferido.
