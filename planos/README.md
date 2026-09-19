@@ -16,6 +16,7 @@ cifra plausible.
 | [05_FALLOS.md](05_FALLOS.md) | los fallos encontrados, con su prueba y su estado |
 | [06_PENDIENTE.md](06_PENDIENTE.md) | lo que falta, por orden |
 | [07_RELOJ_Y_REDUNDANCIA.md](07_RELOJ_Y_REDUNDANCIA.md) | los tres relojes, y lo que el mercado institucional tiene y cripto no |
+| [08_ESTADO_DEL_ARTE.md](08_ESTADO_DEL_ARTE.md) | quién más ha resuelto esto, qué confirma lo nuestro y qué nos falta |
 
 ## La regla que lo gobierna todo
 
