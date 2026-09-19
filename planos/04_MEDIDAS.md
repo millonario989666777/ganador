@@ -135,9 +135,36 @@ Detalle completo en [09_ORACULO_EXTERNO.md](09_ORACULO_EXTERNO.md).
 | tiempo con el feed cortado | **265,8 s de 86.400 = 0,3076 %** |
 | tiempo con el feed vivo | **99,6924 %** |
 
-Los cuatro cortes: 142,4 s (16:15:53), 62,2 s (16:33:44), 61,1 s (18:45:04) y una pérdida
-suelta de 1 mensaje (03:17:29). **Dos de ellos duran ~61 s: huele a temporizador fijo de
-60 s en la reconexión.**
+Los cuatro tramos: 142,4 s (16:15:53), 62,2 s (16:33:44), 61,1 s (18:45:04) y una pérdida
+suelta de 1 mensaje (03:17:29).
+
+**CORREGIDO tras verificar (ver plano 09 §6):** no son cuatro cortes del feed. Midiendo el
+ritmo del crudo contra un control del mismo tamaño, sólo el de 142 s es un apagón (libro al
+0,1 %, **y sin reconexión**). Los de 61 y 62 s son **reconexiones** — aparece conexión nueva,
+el libro sigue al 23 % y al 6 %, y lo que se pierde entero es la cinta de operaciones. El de
+03:17:29 **no es un corte**: el feed va al 102 % y se pierde un solo mensaje.
+
+Los 265,8 s valen para **la cinta de operaciones**. El **libro** sólo murió unos 142 s =
+0,1644 % del día.
+
+Y lo decisivo: los 785 identificadores **no están en el crudo** (`raw/`). No los perdió fs1
+— no llegaron nunca.
+
+## Pérdida real de captura — bybit_2026-09-14 BTCUSDT
+
+Oráculo: `public.bybit.com/trading/`, gratis y sin credenciales.
+
+| | |
+|---|---:|
+| operaciones oficiales | **2.232.223** |
+| nuestras | 2.223.842 |
+| faltan | **8.381 = 0,3755 %** |
+| sobran | **0** |
+| cobertura | **99,6245 %** |
+
+Dos apagones reales: 66,0 s (14:10:40, libro al 1,2 %) y 127,0 s (05:32:45, libro al 0 %),
+**ninguno con reconexión**. Más una pérdida suelta a las 23:59:59 que cae en el cambio de
+día y **se declara dudosa, no confirmada**.
 
 Esta es la primera cifra de pérdida que **no sale de nuestro propio contador**. La cadena
 `pu == u_anterior` da 100,0000 % porque sólo puede juzgar los mensajes que sí tenemos; este

@@ -205,3 +205,113 @@ para el libro.** El oráculo de Binance cubre las *operaciones*, no las *actuali
 libro*. Para el libro, el único oráculo externo disponible es la cinta de Tardis — y sólo del
 día 1 de cada mes, que **no es ninguno de los días que grabamos**. Sirve para saber *cuánto
 pierde un profesional*, que es la vara de medir; no sirve para auditar nuestros días.
+
+---
+
+## 6. VERIFICACIÓN (19-sep-2026, 11:0x UTC) — qué aguanta y qué hay que corregir
+
+No se repitió el mismo cálculo: se comprobó **desde otro ángulo**.
+Guiones: `ORACULO_BINANCE/verificar_cruce.py`, `mirar_crudo.py`, `ritmo_crudo.py`,
+`ORACULO_BYBIT/ritmo_crudo_bybit.py`.
+
+### 6.a. Lo que aguanta
+
+```
+A) FICHERO OFICIAL
+   filas=512737  distintos=512737  min=3448030365  max=3448543101
+   max-min+1 = 512737   -> contigua: SI      duplicados: 0
+B) LO NUESTRO
+   filas de operacion BTCUSDT : 511952
+   ids DISTINTOS              : 511952
+   duplicados nuestros        : 0
+   ids nuestros que el oficial NO tiene: 0
+```
+
+La numeración oficial **es** contigua. Nosotros **no duplicamos** ni una fila y **no
+inventamos** ni un identificador. 785 faltan, 0,1531 %.
+
+### 6.b. Lo decisivo: ¿los perdió el grabador o los perdió fs1?
+
+Se buscaron los identificadores que faltan **en el crudo** (`raw/`, que guarda el
+`payload_json` literal con `connection` y `crc32`):
+
+```
+corte 1 (142 s)  oficiales en la ventana 440   en NUESTRO CRUDO 0
+corte 2 ( 61 s)  oficiales en la ventana 179   en NUESTRO CRUDO 0
+corte 3 ( 62 s)  oficiales en la ventana 159   en NUESTRO CRUDO 0
+suelto  (  1 s)  oficiales en la ventana   1   en NUESTRO CRUDO 0
+```
+
+**Ninguno está en el crudo.** No es un fallo del normalizador: **no llegaron nunca**. El
+785 es pérdida de captura, y la pelota está en PC2.
+
+### 6.c. CORRECCIÓN · "4 cortes del feed" era demasiado fuerte
+
+Se midió el **ritmo real** de mensajes crudos de BTCUSDT dentro de cada ventana y en una
+ventana de control del mismo tamaño justo antes. El ritmo normal **no se supuso, se midió**:
+9,80 msg/s de `book_delta` en los tres controles de binance.
+
+| ventana | book_delta dentro | ritmo | ¿vs normal? | trade dentro | conexiones |
+|---|---:|---:|---:|---:|---|
+| corte 1 · 142 s | 1 | 0,01/s | **0,1 %** | 0 | `0b659219` — **la misma** |
+| corte 2 · 61 s | 136 | 2,23/s | **23 %** | 0 | `d72ce282` → **+`36e2e567`** |
+| corte 3 · 62 s | 39 | 0,63/s | **6 %** | 1 | `48b99cd1` → **+`d72ce282`** |
+| suelto · 1 s | 10 | 10,00/s | **102 %** | 0 | `755c1105` — la misma |
+
+Lo que esto dice, y que **contradice lo que escribí antes**:
+
+1. **Sólo el corte 1 es un apagón de verdad.** 142 s con el libro al 0,1 %. Y lo más
+   incómodo: **la conexión no cambia**. El grabador no reconectó — ni se enteró.
+2. **Los cortes 2 y 3 son reconexiones**, no apagones: aparece **un identificador de
+   conexión nuevo dentro de la ventana**, el libro sigue llegando al 23 % y al 6 %, y lo
+   que se pierde **entero** es la cinta de operaciones. Durante la reconexión el `aggTrade`
+   no vuelve, el `depth` sí.
+3. **El "corte" de 03:17:29 no es un corte.** El feed va al 102 % del ritmo normal y por la
+   misma conexión. Es **un único mensaje perdido con el feed sano**.
+
+Por tanto:
+
+> **"265,8 s con el feed cortado" vale para la cinta de operaciones, que es lo que se midió.
+> No vale leerlo como "el grabador estuvo caído 265,8 s".** El libro sólo murió del todo
+> unos **142 s = 0,1644 %** del día.
+
+### 6.d. Y en bybit (2026-09-14) sale otra cosa
+
+Cruce contra `public.bybit.com/trading/BTCUSDT/BTCUSDT2026-09-14.csv.gz` (77.165.653 B):
+
+```
+OFICIALES ... 2.232.223
+NUESTROS .... 2.223.842
+FALTAN ......     8.381  (0,3755 %)
+SOBRAN ......         0
+```
+
+| ventana | book_delta dentro | ritmo | vs control (5,00/s) | trade dentro | conexiones |
+|---|---:|---:|---:|---:|---|
+| corte A · 66,0 s | 4 | 0,06/s | **1,2 %** | 14 (control 1.100) | `67bc3c22` — **la misma** |
+| corte B · 127,0 s | 0 | 0,00/s | **0 %** | 0 | **ninguna** |
+| suelto · 1 s (23:59:59) | 4 | 4,00/s | 80 % | 19 | la misma |
+
+En bybit los dos cortes **sí son apagones** (1,2 % y 0 %), y en **ninguno de los dos cambia
+la conexión**: el grabador **no reconectó**. El "suelto" de 23:59:59 cae justo en el cambio
+de día — muy probablemente es una operación que quedó en la partición del día siguiente, no
+una pérdida. **Se declara como dudoso, no se cuenta como pérdida confirmada.**
+
+### 6.e. La hipótesis del temporizador de 60 s, revisada
+
+Sigue encajando **sólo donde hubo reconexión**: binance corte 2 (61,1 s) y corte 3 (62,2 s),
+ambos con identificador de conexión nuevo dentro de la ventana. Encaja con un temporizador
+que tarda ~60 s en declarar muerto el socket.
+
+**Pero no explica los otros dos**: binance corte 1 (142 s) y bybit corte A (66 s) pasan
+**sin reconexión ninguna**. Ahí el fallo no es "tarda 60 s en reconectar" sino **no se
+entera de que el feed está muerto**. Son dos averías distintas:
+
+| avería | prueba | qué haría falta |
+|---|---|---|
+| reconexión lenta | conexión nueva dentro de ventanas de 61 y 62 s | ping/pong más corto |
+| **feed muerto sin detectar** | 142 s y 66 s **sin conexión nueva** | vigilante de silencio por símbolo: si un símbolo activo deja de hablar N s, forzar reconexión |
+
+Ambas tocan `capture.py` en PC2. **No se toca sin decisión explícita.**
+
+`orders = 0` · `execution_authority = NONE`
