@@ -315,3 +315,97 @@ entera de que el feed está muerto**. Son dos averías distintas:
 Ambas tocan `capture.py` en PC2. **No se toca sin decisión explícita.**
 
 `orders = 0` · `execution_authority = NONE`
+
+---
+
+## 7. AUDITORÍA DE LA CINTA DE TARDIS, con nuestra regla (19-sep 12:0xZ)
+
+Día **2026-09-01**, binance-futures **BTCUSDT**, canal `depth@0ms`, **1.440 minutos**
+bajados uno a uno desde `api.tardis.dev` sin clave. 3.571 MB crudos, 0 fallos de descarga.
+Guion: `ORACULO_TARDIS/auditar_tardis.py`. Log: `auditoria_tardis.log`.
+
+La cadena **no** se resetea en la frontera de minuto: si su grabación es continua, el último
+`u` de un minuto tiene que encadenar con el primer `pu` del siguiente.
+
+```
+mensajes depthUpdate ....... 3.243.266
+parejas comprobadas ........ 3.243.265
+encadenan .................. 3.243.257
+ROMPEN LA CADENA ...........         8
+sin campo pu ...............         0
+EXACTITUD .................. 99,9998 %
+```
+
+**Control de mi propio método:** de las 8 roturas, **0 caen en frontera de minuto**. Mi
+troceado por minutos no aportó ni una. Son suyas. *(Es justo el error nº 7 del plano 05, esta
+vez comprobado en vez de cometido.)*
+
+### Las 8 roturas son 8 reconexiones — y cada una lleva su foto detrás
+
+Pedí también el canal `depthSnapshot`. Existe, y las fotos aparecen **exactamente** en los
+instantes de las roturas:
+
+| rotura | foto que la reancla | retraso |
+|---|---|---:|
+| 02:47:02,29 | 02:47:03,61 | **+1,33 s** |
+| 08:13:54,14 | 08:13:55,24 | **+1,10 s** |
+| 09:46:02,27 | 09:46:02,90 | **+0,64 s** |
+| 13:06:50,45 | 13:06:53,02 | **+2,58 s** |
+| 15:12:22,32 | 15:12:24,26 | **+1,94 s** |
+| 16:36:57,60 | 16:37:00,54 | **+2,94 s** |
+| 18:27:23,30 | 18:27:24,18 | **+0,88 s** |
+| 18:28:02,67 | 18:28:05,81 | **+3,15 s** |
+
+**Total de libro perdido en todo el día: 14,56 s = 0,0169 %.** Su libro está entero el
+**99,983 %** del día.
+
+Las fotos vienen marcadas `"generated": true`: es una foto REST que **ellos** piden, no algo
+que mande binance. Exactamente lo que hacemos nosotros — pero ellos la piden **al segundo**.
+
+*(Dos roturas a 18:27:23 y 18:28:02, a 39 s una de otra. Un mal rato de red concreto, igual
+que el nuestro a las 16:15 y 16:33.)*
+
+### Lo que NO hay que leer mal en esto
+
+- La `EXACTITUD 99,9998 %` **no significa "pierden 0,0002 %"**. El `u` de binance es un
+  contador global del exchange, no un contador de mensajes de BTCUSDT: un salto de +410.998
+  no son 410.998 mensajes perdidos. Lo que mide es **cuántas veces se rompe**, no cuánto.
+  Lo que sí se puede medir es el **tiempo**, y son esos 14,56 s.
+- Su exactitud sale de una cinta de **un símbolo**; la nuestra, de 200 símbolos repartidos en
+  sockets compartidos. No son cifras intercambiables.
+
+### La comparación que importa
+
+|  | **Tardis** (09-01) | **Nosotros** (09-13) |
+|---|---|---|
+| reconexiones al día | **8** | varias |
+| **cuánto tardan en volver** | **0,64 – 3,15 s** (media 1,8 s) | **60 – 142 s** |
+| libro perdido en el día | **14,56 s** | **142 s sólo en un corte** |
+| silencio máximo de la cinta | **0,70 s** | 5,11 s (socket de libro) |
+| silencios > 1 s | **0** en todo el día | — |
+| latencia recepción − evento | p50 **2,4 ms** · p90 3,2 · p99 4,6 · máx 689 | no medida igual |
+| foto tras reconexión | **sí, al segundo** | sí, pero tarde y desalineada |
+
+> **Un profesional también se cae. Ocho veces al día.** La diferencia no es que ellos no se
+> caigan: es que **se enteran en un segundo y nosotros tardábamos entre 60 y 142**.
+
+Eso es exactamente, y sin saberlo cuando lo escribí, lo que arregla el vigilante de silencio
+que se puso en PC2 hoy a las 11:33Z. **Esta auditoría es la validación externa de ese
+parche.**
+
+### Lo que no podemos igualar
+
+Su latencia de recepción es de **2,4 ms** en la mediana. Eso es estar pegados al exchange.
+Nosotros grabamos desde Perú: esa diferencia **no se arregla con código**, se arregla
+moviendo la máquina. Queda declarada, no disimulada.
+
+### Pendiente
+
+```
+EN CURSO · bajada del canal aggTrade de tardis para el mismo dia 2026-09-01
+           y cruce contra BTCUSDT-aggTrades-2026-09-01.zip de data.binance.vision
+           -> asi se compara SU perdida de operaciones contra nuestro 99,8469 %
+           con el mismo oraculo y el mismo metodo
+```
+
+`orders = 0` · `execution_authority = NONE`
