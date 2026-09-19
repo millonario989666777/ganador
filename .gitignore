@@ -1,0 +1,13 @@
+# Basura que genera Python solo. No se versiona.
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales
+.venv/
+venv/
+
+# Datos y logs: viven en PC2 y PC3, no en el repo
+*.parquet
+*.zip
+*.log
