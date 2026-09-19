@@ -186,3 +186,46 @@ hechas siguen valiendo.
 - **C7b tenía el punto ciego justo aquí.** `C7b_NADA_RELEVANTE_DESCARTADO_EN_SILENCIO` solo
   considera silenciosos `UNKNOWN_EVENT_TYPE` y `EMPTY_RESULT`, así que 196.647 eslabones de
   secuencia tirados pasaron como PASS. El check que existía para esto no lo vio.
+
+## fs2_libro 1.1: la foto vieja no retrocede el libro
+
+La foto REST se pide por un canal distinto al del stream. Su contenido es de un instante
+T0 y se graba en T0 + lo que tarde; en ese hueco el stream avanza. Medido el 19-sep sobre
+`binance_2026-09-13`, 6.134 fotos:
+
+```
+desfase entre el primer delta posterior y el lastUpdateId de la foto
+  mediana +1.762   p10 +405   p90 +8.122   min +4   max +293.042
+```
+
+**Siempre positivo.** Cuando la foto se grababa, el libro que ya teníamos iba por delante.
+
+Hasta la 1.0, `aplicar_foto` vaciaba el libro y se ponía a esperar el delta que cubriera
+`lastUpdateId`. Ese delta ya había pasado, así que el siguiente llegaba descolgado y el
+símbolo se quedaba ciego hasta la foto siguiente, unos 5 minutos después:
+
+| | |
+|---|---|
+| fotos que no enganchaban | 2.416 de 56.687 = **4,3 %** |
+| filas `GAP_AFTER_SNAPSHOT` | 709.534 de 17.279.875 = **4,1 %** |
+| castigo por fallo | 709.534 / 2.416 = 294 s = **4,9 min**, justo la cadencia de foto |
+
+Y de esos 2.416, el **96,9 %** no hacían falta: el libro que se tiraba estaba más al día
+que la foto (246 de 254 en la ventana medida; solo 8 eran pérdida real de datos).
+
+La regla nueva, en una línea: **si el libro vale y la foto no adelanta nada, se ignora y
+se cuenta.** No es descartar información, es no retroceder. Si la foto sí adelanta
+(`u > last_u`) o el libro está roto, se aplica igual que antes.
+
+Esto **solo se puede hacer en diferido**. Un sistema en vivo, cuando le llega la foto
+vieja, ya ha aplicado y tirado los deltas que la cubrían. Nosotros tenemos el fichero
+entero.
+
+Se aplica con `parche_fs2_1_1_foto_vieja.py` (13 pruebas) y se comprueba con
+`prueba_fs2_foto_vieja.py`, que ejecuta la clase `Libro` real contra mensajes sintéticos.
+
+### Lo que NO era
+
+Antes de medir esto propuse arreglar el grabador (la foto en banda de bybit, que falta los
+cinco días). Era el orden equivocado: esa foto solo llega al suscribirse, unas 9 veces al
+día. El 4,1 % de tiempo perdido no era de captura, era de reconstrucción.
