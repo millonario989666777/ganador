@@ -62,6 +62,21 @@ irrecuperable.
       precio de TOKIO hay que reconstruir su libro, y TOKIO no tiene fotos. Solo es
       viable vía trades (bybit/okx), no en binance.
 
+## Validación externa — ya no es teórica (ver plano 09)
+
+10.b. **HECHO**: cruce contra el archivo oficial de Binance, `binance_2026-09-13` BTCUSDT.
+   Faltan 785 aggTrades de 512.737 = **0,1531 %**; sobran 0; **4 cortes, 265,8 s**.
+10.c. **Arreglar el corte de ~61 s.** Dos de los tres cortes duran 61,1 s y 62,2 s. Un
+   temporizador fijo de 60 s tarda ese minuto en detectar la caída. Bajarlo (ping/pong
+   cada 5–10 s, *read timeout* corto) debería recortar ~123 s de los 265,8 s del día.
+   **Toca PC2: no se hace sin decisión explícita.**
+10.d. **Extender el cruce a los cinco días y a más símbolos**, y publicar `missing_total`
+   junto a cada partición, como hace `market-tape`.
+10.e. **Cruzar bybit** contra `public.bybit.com/trading/`, que sí cubre 09-13…09-18.
+10.f. **Auditar la cinta cruda de Tardis (2026-09-01) con nuestra regla** y publicar su
+   exactitud al lado de la nuestra. Es la única vara de medir externa que hay para el
+   *libro*, no sólo para las operaciones.
+
 ## Abierto sin investigar
 
 11. `okx_2026-09-13`: **211 reconexiones** frente al umbral de 200 de la norma.

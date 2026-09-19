@@ -116,3 +116,31 @@ Tampoco hay fotos (`kind` solo vale 1 = nivel de libro, 2 = operación) ni paylo
 
 **Sí sirve** como segunda opinión para los 15 símbolos, para los días 11, 12, 18 y 19 que
 no tenemos derivados, y bitstamp/deribit son mercados nuevos.
+
+---
+
+## Pérdida real de captura, medida desde fuera — binance_2026-09-13 BTCUSDT
+
+Oráculo: archivo oficial de Binance, `data.binance.vision`, gratis y sin credenciales.
+Detalle completo en [09_ORACULO_EXTERNO.md](09_ORACULO_EXTERNO.md).
+
+| | |
+|---|---:|
+| aggTrades oficiales (numeración contigua, 0 huecos suyos) | **512.737** |
+| aggTrades nuestros | 511.952 |
+| faltan | **785 = 0,1531 %** |
+| sobran / inventados / duplicados | **0** |
+| cobertura de operaciones | **99,8469 %** |
+| cortes del feed | **4** |
+| tiempo con el feed cortado | **265,8 s de 86.400 = 0,3076 %** |
+| tiempo con el feed vivo | **99,6924 %** |
+
+Los cuatro cortes: 142,4 s (16:15:53), 62,2 s (16:33:44), 61,1 s (18:45:04) y una pérdida
+suelta de 1 mensaje (03:17:29). **Dos de ellos duran ~61 s: huele a temporizador fijo de
+60 s en la reconexión.**
+
+Esta es la primera cifra de pérdida que **no sale de nuestro propio contador**. La cadena
+`pu == u_anterior` da 100,0000 % porque sólo puede juzgar los mensajes que sí tenemos; este
+cruce mide justamente lo que a esa regla se le escapa: los tramos en los que no hay nada.
+
+`orders = 0` · `execution_authority = NONE`

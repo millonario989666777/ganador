@@ -104,3 +104,9 @@ cierra, mueren los tres.** No es nuestro, pero queda avisado.
    675 ficheros de salida tardan en leerse, y el gate solo escribe en el log cuando
    termina. Es el mismo error que el número 1, con otro disfraz: **ausencia de señal no es
    señal de ausencia**. Antes de dar una alarma, mirar los hijos del proceso.
+7. **Conté como roturas ajenas los huecos de mi propio muestreo.** Auditando la cinta de
+   Tardis pedí una hora por petición sin saber que el acceso gratuito sólo entrega el
+   primer minuto de cada rango. Encadené los `pu` a través de esos saltos de 59 minutos y
+   salieron ~13 roturas: una por frontera. **El defecto era del muestreo, no de la
+   grabación auditada.** Antes de atribuir una rotura, comprobar que los dos mensajes que
+   la delimitan son realmente consecutivos en el tiempo.
