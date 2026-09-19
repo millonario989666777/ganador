@@ -9,7 +9,7 @@ Todo lo medido, con su fuente. Nada estimado salvo donde diga **PROYECCIÓN**.
 | símbolos | 200 | 200 |
 | filas de libro (rejilla 1 s) | 1.872.075 | 17.279.875 |
 | **usables con fs2 1.0** | 93,8664 % | **94,624 %** |
-| **usables con fs2 1.1** | **97,6850 %** | *corriendo* |
+| **usables con fs2 1.1** | **97,6850 %** | **98,537 %** |
 
 Mensajes del día completo (fs2 1.0):
 
@@ -169,5 +169,90 @@ día y **se declara dudosa, no confirmada**.
 Esta es la primera cifra de pérdida que **no sale de nuestro propio contador**. La cadena
 `pu == u_anterior` da 100,0000 % porque sólo puede juzgar los mensajes que sí tenemos; este
 cruce mide justamente lo que a esa regla se le escapa: los tramos en los que no hay nada.
+
+`orders = 0` · `execution_authority = NONE`
+
+
+---
+
+## fs2 1.1 · día completo terminado (19-sep 11:31Z)
+
+`binance_2026-09-13`, 582 ficheros, 200 símbolos, rejilla 1 s. 2 h 47 min (10.034 s).
+
+| | fs2 1.0 | fs2 1.1 | |
+|---|---:|---:|---|
+| filas de libro | 17.279.875 | 17.279.875 | = |
+| **usables** | 16.350.859 | **17.027.144** | **+676.285** |
+| **% usable** | 94,624 % | **98,537 %** | **+3,91 pt** |
+| `GAP_AFTER_SNAPSHOT` | 709.534 | **31.019** | −95,6 % |
+| `hueco_tras_foto` | 2.416 | **175** | −92,8 % |
+| `invalido` | 4.672.704 | **380.297** | −91,9 % |
+| `ok` | 63.524.852 | **67.819.499** | +4.294.647 |
+| `fotos` aplicadas | 56.687 | 17.522 | |
+| `foto_vieja_ignorada` | — | **39.165** | |
+| `sin_foto` | 128.939 | 128.939 | = |
+| `previo_a_foto` | 7.568 | 7.568 | = |
+| `rotura` | 679 | **680** | **+1, sin explicar** |
+
+**La cuenta cuadra exacta:** 17.522 + 39.165 = 56.687. Son las mismas fotos; ahora 39.165 se
+descartan por viejas en lugar de tirar el libro al suelo.
+
+Motivos de no usable con 1.1: `NO_SNAPSHOT_YET` 30.081 · `EMPTY_SIDE` 30.081 ·
+`GAP_AFTER_SNAPSHOT` 31.019 · `STALE_BOOK` 135.038 · `CHAIN_BREAK` 57.017.
+
+**ABIERTO:** `rotura` pasó de 679 a 680. Uno más. Es determinista, no es ruido. La hipótesis
+es que con 1.1 hay un delta que antes se tragaba un reinicio de libro y ahora sí llega a
+comprobarse — **pero no está demostrado y no se da por bueno**.
+
+---
+
+## El coste real, recalculado sobre el libro recuperado
+
+Los mismos dos guiones, ahora sobre `book_state_v11` (17.027.144 segundos usables en vez de
+16.350.859).
+
+| medio spread (pb) | con 1.0 | **con 1.1** |
+|---|---:|---:|
+| p10 | 0,4385 | 0,4385 |
+| p25 | — | 0,7434 |
+| **mediana** | **1,3656** | **1,391** |
+| p75 | 2,4137 | 2,4149 |
+| p90 | 3,5249 | 3,5273 |
+| máx | 6,1614 | 6,1614 |
+| **símbolos por debajo de 1 pb** | **74** | **73** |
+
+### Lo incómodo: recuperar datos hizo el coste PEOR, no mejor
+
+Los 676.285 segundos que antes se tiraban son justo los de **después de una foto o una
+reconexión**, que es cuando el libro está más fino y el spread más ancho. Al recuperarlos,
+la mediana sube de 1,3656 a 1,391 pb y un símbolo más se cae de la lista de "baratos".
+
+> **El número viejo era optimista por supervivencia.** No porque estuviera mal calculado,
+> sino porque los peores momentos del día no llegaban a la cuenta: se descartaban como no
+> usables. Es exactamente el sesgo que convierte un backtest bonito en una pérdida real.
+
+Dirección confirmada; la magnitud exacta del sesgo **NO MEDIDA** (haría falta marcar qué
+segundos son los recuperados y medirlos aparte).
+
+### Fondo por tamaño de orden (sin cambios materiales)
+
+| | L1 | L5 | L20 |
+|---|---:|---:|---:|
+| mediana USD | 158 | 4.502 | 40.549 |
+| p10 | 32 | 449 | 6.332 |
+| p90 | 2.123 | 44.364 | 279.142 |
+
+**Cuántos de los 200 símbolos aguantan una orden, dentro de 20 niveles:**
+
+| orden | en 1 nivel | en 5 niveles | **en 20 niveles** |
+|---|---:|---:|---:|
+| 500 USD | 40 | 176 | **200** |
+| 1.000 USD | 26 | 153 | **200** |
+| 5.000 USD | 13 | 95 | 184 |
+| 10.000 USD | 8 | 67 | 163 |
+| 25.000 USD | 5 | 30 | 128 |
+| 100.000 USD | 3 | 12 | 55 |
+
+Con 500–1.000 USD **caben los 200**. A partir de 5.000 USD empieza a caerse la cola.
 
 `orders = 0` · `execution_authority = NONE`
