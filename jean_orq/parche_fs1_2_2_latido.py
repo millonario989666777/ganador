@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""parche_fs1_2_2_latido - sube fs1_normalizar de 2.1 a 2.2 y deja de tirar el latido de bybit.
+"""parche_fs1_2_2_latido - sube fs1_normalizar de 2.1 a 2.2. Tres cosas que se tiraban.
 
 QUE ARREGLA
 
@@ -21,8 +21,20 @@ QUE ARREGLA
   identificadores y nada mas. fs2_libro ya salta los niveles con precio nulo
   (fs2_libro.py:433), asi que esa fila encadena el libro sin tocarlo.
 
-ALCANCE MEDIDO: solo bybit. binance (236.214 book_delta) y okx (136.286) tienen
-CERO deltas vacios, asi que su salida con 2.2 es identica a la de 2.1.
+  (2) okx tira su FOTO EN BANDA. El grabador etiqueta action=="snapshot" como kind
+      `book_snapshot` (exchanges.py:216), y el lector de okx solo conoce `book_delta` y
+      `book_deep_snapshot`: la foto cae en UNKNOWN_EVENT_TYPE y se descarta.
+      MEDIDO en okx_2026-09-13: 606 fotos al dia a la basura. Son las MEJORES que hay,
+      porque llegan por el mismo socket que los deltas y no hay que adivinar donde
+      encajan. Traen bids, asks, seqId y prevSeqId = -1, que es como okx marca una foto.
+      Por culpa de esto el gate dio FAIL 10/12 en esa particion.
+
+  (3) okx tambien tiene latidos: 105 al dia salen como EMPTY_RESULT, con el motivo
+      "el lector de okx atendio book_delta y no emitio nada".
+
+ALCANCE MEDIDO: bybit y okx. binance no tiene ni un delta vacio (0 de 236.214) y su
+stream no lleva foto en banda por protocolo, asi que su salida con 2.2 es identica a la
+de 2.1 y sus particiones ya hechas siguen valiendo.
 
 POR QUE SE NIEGA A CORRER EN CALIENTE
 
@@ -81,9 +93,49 @@ NUEVO_DIALECTOS = '''        if not b and not a:
             return True
 '''
 
+# --- okx: la foto en banda llega como kind "book_snapshot" y el lector no la conocia
+VIEJO_OKX_RAMA = """    if kind == \"book_delta\":
+        if not items:
+            return malo(\"BAD_SHAPE\", \"book_delta de okx sin lista data\")
+        accion = \"SNAPSHOT\" if d.get(\"action\") == \"snapshot\" else \"UPDATE\"
+"""
+
+NUEVO_OKX_RAMA = """    if kind in (\"book_delta\", \"book_snapshot\"):
+        # El grabador manda la foto EN BANDA de okx como kind \"book_snapshot\"
+        # (exchanges.py:216, action==\"snapshot\"). Hasta 2.1 este lector solo conocia
+        # book_delta y book_deep_snapshot, asi que la foto caia en UNKNOWN_EVENT_TYPE:
+        # 606 al dia medidas en okx_2026-09-13, y el gate en FAIL 10/12 por eso.
+        # La forma del payload es la misma que la de un delta; lo unico que cambia es
+        # que sustituye el libro en vez de sumarse, y que okx la marca con prevSeqId=-1.
+        if not items:
+            return malo(\"BAD_SHAPE\", \"%s de okx sin lista data\" % kind)
+        accion = \"SNAPSHOT\" if (kind == \"book_snapshot\" or d.get(\"action\") == \"snapshot\") else \"UPDATE\"
+"""
+
+VIEJO_OKX_NIV = """            ids = {\"book_update_id\": it.get(\"seqId\"), \"book_prev_update_id\": it.get(\"prevSeqId\")}
+            niveles(it.get(\"bids\"), \"BID\", accion, ids)
+"""
+
+NUEVO_OKX_NIV = """            ids = {\"book_update_id\": it.get(\"seqId\"), \"book_prev_update_id\": it.get(\"prevSeqId\")}
+            if not it.get(\"bids\") and not it.get(\"asks\"):
+                # Latido: seqId nuevo sin ningun nivel que haya cambiado. Mismo caso que
+                # en bybit. Hasta 2.1 salia como EMPTY_RESULT (105 al dia medidos) y se
+                # perdia el eslabon de la cadena. Se emite una fila sin niveles.
+                if it.get(\"seqId\") is None:
+                    malo(\"BOOK_DELTA_SIN_NIVELES_NI_SEQ\", \"ts=%s\" % it.get(\"ts\"))
+                    continue
+                emit({\"side\": None, \"price\": None, \"qty\": None, \"level\": None,
+                      \"action\": accion, \"book_first_update_id\": None,
+                      \"book_update_id\": it.get(\"seqId\"),
+                      \"book_prev_update_id\": it.get(\"prevSeqId\")},
+                     (\"BOOK_DELTA_SIN_NIVELES\",))
+                continue
+            niveles(it.get(\"bids\"), \"BID\", accion, ids)
+"""
+
 VIEJO_VERSION = 'CODE_VERSION = "fs1_normalizar/2.1"  # 2.1: hora de evento por venue (bybit/okx)'
-NUEVO_VERSION = ('CODE_VERSION = "fs1_normalizar/2.2"  # 2.2: el latido de libro de bybit se emite, '
-                 'no se tira')
+NUEVO_VERSION = ('CODE_VERSION = "fs1_normalizar/2.2"  # 2.2: latidos de bybit y okx emitidos, '
+                 'y la foto en banda de okx deja de tirarse')
 
 
 def sha(texto):
@@ -101,15 +153,22 @@ def transformar(dialectos, normalizador):
     Separada del disco a proposito: asi el autotest prueba la transformacion de verdad
     y no una imitacion.
     """
-    if NUEVO_DIALECTOS.strip() in dialectos:
-        raise ValueError("YA_APLICADO: fs1_dialectos.py ya emite el latido")
+    if NUEVO_DIALECTOS.strip() in dialectos or 'kind in ("book_delta", "book_snapshot")' in dialectos:
+        raise ValueError("YA_APLICADO: fs1_dialectos.py ya trae los cambios de 2.2")
     if dialectos.count(VIEJO_DIALECTOS) != 1:
         raise ValueError("NO_ENCAJA: el bloque del latido aparece %d veces en fs1_dialectos.py"
                          % dialectos.count(VIEJO_DIALECTOS))
     if normalizador.count(VIEJO_VERSION) != 1:
         raise ValueError("NO_ENCAJA: CODE_VERSION 2.1 aparece %d veces en fs1_normalizar.py"
                          % normalizador.count(VIEJO_VERSION))
+    for viejo, nombre in ((VIEJO_OKX_RAMA, "rama de libro de okx"),
+                          (VIEJO_OKX_NIV, "niveles de okx")):
+        if dialectos.count(viejo) != 1:
+            raise ValueError("NO_ENCAJA: %s aparece %d veces en fs1_dialectos.py"
+                             % (nombre, dialectos.count(viejo)))
     d2 = dialectos.replace(VIEJO_DIALECTOS, NUEVO_DIALECTOS)
+    d2 = d2.replace(VIEJO_OKX_RAMA, NUEVO_OKX_RAMA)
+    d2 = d2.replace(VIEJO_OKX_NIV, NUEVO_OKX_NIV)
     n2 = normalizador.replace(VIEJO_VERSION, NUEVO_VERSION)
     for nombre, txt in (("fs1_dialectos.py", d2), ("fs1_normalizar.py", n2)):
         ast.parse(txt)   # si el resultado no compila, no sale de aqui
@@ -147,19 +206,31 @@ def _fixture():
             + VIEJO_DIALECTOS +
             '        niveles(b, "BID", accion, ids)\n'
             '        niveles(a, "ASK", accion, ids)\n'
+            '        return True\n'
+            '\n\n'
+            'def okx(kind, d, data, ctx):\n'
+            '    emit, niveles, fnum, malo = ctx["emit"], ctx["niveles"], ctx["fnum"], ctx["malo"]\n'
+            '    items = data if isinstance(data, list) else []\n'
+            + VIEJO_OKX_RAMA +
+            '        for it in items:\n'
+            '            if not isinstance(it, dict):\n'
+            '                malo("BAD_SHAPE", "elemento de book_delta no es dict")\n'
+            '                continue\n'
+            + VIEJO_OKX_NIV +
+            '            niveles(it.get("asks"), "ASK", accion, ids)\n'
             '        return True\n')
 
 
-def _correr(codigo, data):
-    """Ejecuta el bybit() resultante contra un ctx de mentira y devuelve lo que hizo."""
+def _correr(codigo, data, fn="bybit", kind="book_delta", d=None):
+    """Ejecuta el lector resultante contra un ctx de mentira y devuelve lo que hizo."""
     filas, cuar, nivs = [], [], []
     ctx = {"emit": lambda extra, flags=(): filas.append((dict(extra), tuple(flags))),
-           "niveles": lambda pares, side, accion, ids=None: nivs.append((side, list(pares or []))),
+           "niveles": lambda pares, side, accion, ids=None: nivs.append((side, accion, list(pares or []))),
            "fnum": float,
            "malo": lambda code, detail="": (cuar.append(code), True)[1]}
     ns = {}
     exec(compile(codigo, "<fixture>", "exec"), ns)
-    ns["bybit"]("book_delta", {"type": "delta"}, data, ctx)
+    ns[fn](kind, d if d is not None else {"type": "delta"}, data, ctx)
     return filas, cuar, nivs
 
 
@@ -204,6 +275,36 @@ def autotest():
     f, c, nv = _correr(d2, SIN_U)
     check("2.2: sin u sigue yendo a cuarentena", c == ["BOOK_DELTA_SIN_NIVELES_NI_U"] and not f, (f, c))
 
+    # --- okx: la foto en banda ---
+    FOTO_OKX = [{"bids": [["0.03731", "427", "0", "4"]], "asks": [["0.03740", "100", "0", "2"]],
+                 "ts": 1789261477207, "checksum": 0, "seqId": 729624411, "prevSeqId": -1}]
+    f, c, nv = _correr(dial, FOTO_OKX, fn="okx", kind="book_snapshot", d={"action": "snapshot"})
+    check("2.1: la foto en banda de okx no se atendia", (f, c, nv) == ([], [], []), (f, c, nv))
+    f, c, nv = _correr(d2, FOTO_OKX, fn="okx", kind="book_snapshot", d={"action": "snapshot"})
+    check("2.2: la foto en banda de okx se atiende", len(nv) == 2 and not c, (nv, c))
+    check("2.2: y se marca como SNAPSHOT, no como UPDATE",
+          bool(nv) and all(x[1] == "SNAPSHOT" for x in nv), nv)
+
+    # --- okx: el latido ---
+    LATIDO_OKX = [{"bids": [], "asks": [], "ts": 1, "seqId": 500, "prevSeqId": 499}]
+    f, c, nv = _correr(dial, LATIDO_OKX, fn="okx")
+    # en 2.1 se llamaba a niveles() con las listas vacias: cero filas emitidas. Eso es
+    # exactamente lo que el normalizador contaba luego como EMPTY_RESULT.
+    check("2.1: el latido de okx no emitia ni una fila",
+          f == [] and c == [] and all(x[2] == [] for x in nv), (f, c, nv))
+    f, c, nv = _correr(d2, LATIDO_OKX, fn="okx")
+    check("2.2: el latido de okx sale como fila", len(f) == 1 and not c and not nv, (f, c, nv))
+    if f:
+        fila, flags = f[0]
+        check("2.2: el latido de okx lleva seqId y prevSeqId",
+              fila["book_update_id"] == 500 and fila["book_prev_update_id"] == 499, fila)
+
+    # --- okx: un delta normal no cambia ---
+    DELTA_OKX = [{"bids": [["1.0", "2", "0", "1"]], "asks": [], "seqId": 10, "prevSeqId": 9}]
+    a0 = _correr(dial, DELTA_OKX, fn="okx")
+    a1 = _correr(d2, DELTA_OKX, fn="okx")
+    check("2.2: un delta de okx con niveles se comporta igual", a0 == a1 and a1[2], (a0, a1))
+
     # --- seguridad del propio parche ---
     try:
         transformar(d2, n2)
@@ -243,7 +344,9 @@ def main():
             print("NO_ESTA: %s" % p)
             return 2
 
-    vivos = normalizadores_vivos()
+    # El candado solo aplica a --aplicar: un ensayo no escribe nada y conviene poder
+    # comprobar que los anclajes siguen encajando aunque haya trabajo en curso.
+    vivos = normalizadores_vivos() if a.aplicar else []
     if vivos and not a.forzar:
         print("ABORTA: hay %d normalizador(es) vivo(s): %s" % (len(vivos), vivos))
         print("g1_particion sella el sha DESPUES de correr, asi que cambiar el fichero ahora")
